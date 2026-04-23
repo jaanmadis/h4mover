@@ -4,6 +4,7 @@ using UnityEngine;
 [RequireComponent(typeof(Rigidbody))]
 public class PlayerMovementController : MonoBehaviour
 {
+    [SerializeField] private CapsuleCollider capsuleCollider;
     [SerializeField] private Transform orientation;
 
     private const float ASCEND_COOLDOWN = 1f;
@@ -20,11 +21,18 @@ public class PlayerMovementController : MonoBehaviour
     private bool descendReady = true;
     private bool descendRequested = false;
     private bool grounded = false;
+    private float horizontalSpeed = 0f;
+    private float verticalSpeed = 0f;
     private float moveInputX;
     private float moveInputZ;
     private Rigidbody rigidBody;
+    private Vector3 groundNormal;
 
     public float Altitude => altitude;
+    //public float AngleToCapsule => angleToCapsule;
+    //public float DistanceToCapsule => distanceToCapsule;
+    public float HorizontalSpeed => horizontalSpeed;
+    public float VerticalSpeed => verticalSpeed;
 
     void Awake()
     {
@@ -34,25 +42,31 @@ public class PlayerMovementController : MonoBehaviour
 
     void FixedUpdate()
     {
-        if (Physics.Raycast(transform.position, -transform.up, out RaycastHit hit, 100f)) // qqq i can be holding on with one toe and the counted as "not grounded!"
+        float radius = capsuleCollider.radius - 0.1f;
+        if (Physics.SphereCast(transform.position, radius, -transform.up, out RaycastHit hitler, 100f))
         {
-            altitude = hit.distance - Constants.PLAYER_HEIGHT * 0.5f;
+            altitude = hitler.distance + radius - Constants.PLAYER_HEIGHT * 0.5f;
         }
+
+        Debug.Log($"groundNormal={groundNormal}, hit.normal={hitler.normal}");
+
+        // Split current velocity
+        Vector3 currentVelocity = rigidBody.linearVelocity;
+        Vector3 horizontalComponent = Vector3.ProjectOnPlane(currentVelocity, groundNormal);
+        Vector3 verticalComponent = Vector3.Project(currentVelocity, groundNormal);
+
+        horizontalSpeed = horizontalComponent.magnitude;
+        verticalSpeed = verticalComponent.magnitude * Mathf.Sign(Vector3.Dot(verticalComponent, groundNormal));
 
         grounded = altitude <= GROUNDED_THRESHOLD;
         if (grounded)
         {
-            // Split current velocity
-            Vector3 currentVelocity = rigidBody.linearVelocity;
-            Vector3 verticalComponent = Vector3.Project(currentVelocity, hit.normal);
-            Vector3 horizontalComponent = Vector3.ProjectOnPlane(currentVelocity, hit.normal);
-
             // Get player move direction based in which way they are facing and user inputs
             Vector3 moveDirection = orientation.forward * moveInputZ + orientation.right * moveInputX;
             if (moveDirection.sqrMagnitude > 0f)
             {
                 // Apply movement to horizontal component
-                Vector3 moveDirOnGround = Vector3.ProjectOnPlane(moveDirection, hit.normal).normalized;
+                Vector3 moveDirOnGround = Vector3.ProjectOnPlane(moveDirection, groundNormal).normalized;
                 horizontalComponent = Vector3.ClampMagnitude(horizontalComponent + moveDirOnGround * HORIZONTAL_MOVEMENT_FACTOR, 4f);
             }
             else
@@ -82,6 +96,16 @@ public class PlayerMovementController : MonoBehaviour
             rigidBody.AddForce(-up * DESCEND_FORCE, ForceMode.Impulse);
             StartCoroutine(DescendCooldown());
         }
+    }
+
+    void OnCollisionStay(Collision collision)
+    {
+        Vector3 normal = Vector3.zero;
+        for (int i = 0; i < collision.contactCount; i++)
+        {
+            normal += collision.contacts[i].normal;
+        }
+        groundNormal = (normal / collision.contactCount).normalized;
     }
 
     public void HandleAscend()

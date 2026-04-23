@@ -28,6 +28,7 @@ public class PlayerCanvasController : MonoBehaviour
 
     [Header("Navigation Panel")]
     [SerializeField] private TextMeshProUGUI altitudeValueText;
+    [SerializeField] private TextMeshProUGUI horizontalSpeedText;
     [SerializeField] private TextMeshProUGUI verticalSpeedText;
     [SerializeField] private TextMeshProUGUI distanceText;
     [SerializeField] private TextMeshProUGUI angleText;
@@ -44,10 +45,11 @@ public class PlayerCanvasController : MonoBehaviour
     private const string OBJECTIVE_TEXT =      "Objective     [Tab]";
     private const string NEW_OBJECTIVE_TEXT =  "Objective     [Tab] *";
 
-    private const string ALTITUDE_VALUE_FORMAT = " ALT: {0,8:000.0} [m]";
-    private const string VERTICAL_SPEED_FORMAT = "VSPD: {0,8:+000.0;-000.0; 000.0} [m/s]";
-    private const string DISTANCE_FORMAT =       " DST: {0,8:000.0} [m]";
-    private const string ANGLE_FORMAT =          " ANG: {0,8:000.0} [\u00B0]";
+    private const string ALTITUDE_VALUE_FORMAT =   " ALT: {0,8:000.0} [m]";
+    private const string HORIZONTAL_SPEED_FORMAT = "HSPD: {0,8:000.0} [m/s]";
+    private const string VERTICAL_SPEED_FORMAT =   "VSPD: {0,8:+000.0;-000.0; 000.0} [m/s]";
+    private const string DISTANCE_FORMAT =         " DST: {0,8:000.0} [m]";
+    private const string ANGLE_FORMAT =            " ANG: {0,8:000.0} [\u00B0]";
 
     private bool objectivesAvailable = false;
     private string seenObjectiveId = null;
@@ -88,7 +90,7 @@ public class PlayerCanvasController : MonoBehaviour
 
     void Update()
     {
-        lightText.color = playerHelmetLight.enabled ? Color.yellow : Color.white;
+        //lightText.color = playerHelmetLight.enabled ? Color.yellow : Color.white;
     }
 
     void FixedUpdate()
@@ -96,7 +98,8 @@ public class PlayerCanvasController : MonoBehaviour
         altitudeValueText.text = string.Format(ALTITUDE_VALUE_FORMAT, playerMovementController.Altitude);
         //angleText.text = string.Format(ANGLE_FORMAT, playerMovementController.AngleToCapsule);
         //distanceText.text = string.Format(DISTANCE_FORMAT, playerMovementController.DistanceToCapsule);
-        //verticalSpeedText.text = string.Format(VERTICAL_SPEED_FORMAT, playerMovementController.VerticalSpeed);
+        horizontalSpeedText.text = string.Format(HORIZONTAL_SPEED_FORMAT, playerMovementController.HorizontalSpeed);
+        verticalSpeedText.text = string.Format(VERTICAL_SPEED_FORMAT, playerMovementController.VerticalSpeed);
     }
 
     public void HandleShowObjectives(bool show)
