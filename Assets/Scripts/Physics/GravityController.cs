@@ -17,7 +17,7 @@ public class GravityController : MonoBehaviour
 
     void FixedUpdate()
     {
-        // Add gravity force towards asteroid center
+        //Add gravity force towards asteroid center
         rigidBody.AddForce(-1 * Constants.GRAVITY_STRENGTH_ASTEROID * PhysicsUtils.Up(transform), ForceMode.Acceleration);
     }
 }
