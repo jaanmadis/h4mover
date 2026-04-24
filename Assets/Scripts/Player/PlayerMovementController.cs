@@ -1,18 +1,22 @@
 using System.Collections;
 using UnityEngine;
 using UnityEngine.EventSystems;
+using UnityEngine.UI;
 
 // Flat surface
-
-// Slope up
-// Slope down
-
 // Jump
 // Descend
+
+// Slope up -> steepness problem
+// Slope down -> steepness problem
+
+// Climbing
+// Vaulting
 // Stairs
 // Ladder
 // Grappling hoook
 // ledges
+// sprint
 
 [RequireComponent(typeof(Rigidbody))]
 public class PlayerMovementController : MonoBehaviour
@@ -20,20 +24,25 @@ public class PlayerMovementController : MonoBehaviour
     [SerializeField] private CapsuleCollider capsuleCollider;
     [SerializeField] private Transform orientation;
 
+    private const float ALTITUDE_CHECK_MAX_DISTANCE = 100f;
     private const float ASCEND_COOLDOWN = 1f;
-    private const float ASCEND_FORCE = 1000f;
-    private const float DESCEND_FORCE = 1000f;
+    private const float ASCEND_FORCE = 600f;
+    private const float DESCEND_FORCE = 600f;
     private const float DESCEND_COOLDOWN = 1f;
     private const float GROUNDED_THRESHOLD = 0.02f;
-    private const float HORIZONTAL_MOVEMENT_DECAY = 0.8f;
-    private const float HORIZONTAL_MOVEMENT_FACTOR = 1.1f;
+    private const float MAX_VELOCITY = 4f;
+    private const float VELOCITY_FACTOR = 10f;
+    private const float MIN_LINEAR_DAMPING = 1f;
+    private const float MAX_LINEAR_DAMPING = 100f;
+    private const float LINEAR_DAMPING_FACTOR = 2f;
+    private const float MAX_SLOPE_ANGLE = 50f;
 
     private enum State
     {
-        Detached,
+        Falling,
         Grounded,
         Ascending,
-        Descending,
+        Slipping,
     }
 
     private float altitude = 0f;
@@ -46,8 +55,7 @@ public class PlayerMovementController : MonoBehaviour
     private float moveInputX;
     private float moveInputZ;
     private Rigidbody rigidBody;
-    private Vector3 groundNormal;
-    private State state = State.Detached;
+    private State state = State.Falling;
 
     public float Altitude => altitude;
     //public float AngleToCapsule => angleToCapsule;
@@ -61,12 +69,12 @@ public class PlayerMovementController : MonoBehaviour
         rigidBody.freezeRotation = true;
     }
 
-    void FixedUpdateThisIsFine()
+    void FixedUpdate()
     {
         Vector3 up = PhysicsUtils.Up(transform);
 
-        float radius = capsuleCollider.radius;
-        if (Physics.SphereCast(transform.position, radius, -transform.up, out RaycastHit hit, 100f))
+        float radius = capsuleCollider.radius - 0.01f;
+        if (Physics.SphereCast(transform.position, radius, -transform.up, out RaycastHit hit, ALTITUDE_CHECK_MAX_DISTANCE))
         {
             altitude = hit.distance + radius - Constants.PLAYER_HEIGHT * 0.5f;
         }
@@ -78,51 +86,69 @@ public class PlayerMovementController : MonoBehaviour
         horizontalSpeed = horizontalComponent.magnitude;
         verticalSpeed = verticalComponent.magnitude * Mathf.Sign(Vector3.Dot(verticalComponent, up));
 
-        float angle = Vector3.Angle(up, hit.normal);
-        Vector3 upp = Vector3.Project(up, hit.normal).normalized;
-
+        float slopeAngle = Vector3.Angle(up, hit.normal);
         bool isGrounded = altitude <= GROUNDED_THRESHOLD;
 
-        if (isGrounded && (state == State.Detached || state == State.Descending))
+        if (isGrounded && (state == State.Falling || state == State.Ascending))
         {
             state = State.Grounded;
         }
         else if (!isGrounded && state == State.Grounded)
         {
-            state = State.Detached;
+            state = State.Falling;
         }
         else if (verticalSpeed < 0 && state == State.Ascending)
         {
-            state = State.Descending;
+            state = State.Falling;
+        }
+        else if (slopeAngle > MAX_SLOPE_ANGLE && state == State.Grounded)
+        {
+            state = State.Slipping;
+        }
+        else if (slopeAngle <= MAX_SLOPE_ANGLE && isGrounded && state == State.Slipping)
+        {
+            state = State.Grounded;
+        }
+        else if (slopeAngle <= MAX_SLOPE_ANGLE && !isGrounded && state == State.Slipping)
+        {
+            state = State.Falling;
         }
 
-        Debug.Log($"state={state}, currentVelocity={currentVelocity}, currentVelocity.magnitude={currentVelocity.magnitude}, up={up}, upp={upp}, hn={hit.normal}, verticalComponent={verticalComponent}, horizontalComponent={horizontalComponent}, angle={angle}");
+        Debug.Log($"state={state}, currentVelocity={currentVelocity}, currentVelocity.magnitude={currentVelocity.magnitude}, up={up}, hn={hit.normal}, verticalComponent={verticalComponent}, horizontalComponent={horizontalComponent}, slopeAngle={slopeAngle}");
 
         if (state == State.Grounded)
         {
             Vector3 moveDirection = orientation.forward * moveInputZ + orientation.right * moveInputX;
             if (moveDirection.sqrMagnitude > 0f)
             {
-                Vector3 tergetVelocity = moveDirection.normalized * 4f;
-                Vector3 deltaVelocity = tergetVelocity - currentVelocity;
+                Vector3 targetVelocity = moveDirection.normalized * MAX_VELOCITY;
+                Vector3 deltaVelocity = targetVelocity - currentVelocity;
+                Vector3 deltaVelocityPlane = Vector3.ProjectOnPlane(deltaVelocity, hit.normal);
                 rigidBody.linearDamping = 0;
-                rigidBody.AddForce(deltaVelocity * 10f, ForceMode.Acceleration);
+                rigidBody.AddForce(deltaVelocityPlane * VELOCITY_FACTOR, ForceMode.Acceleration);
+                Debug.Log($"deltaVelocityPlane={deltaVelocityPlane}");
             }
             else
             {
-                rigidBody.linearDamping = Mathf.Clamp(rigidBody.linearDamping * 2f, 1f, 100f);
+                rigidBody.linearDamping = Mathf.Clamp(rigidBody.linearDamping * LINEAR_DAMPING_FACTOR, MIN_LINEAR_DAMPING, MAX_LINEAR_DAMPING);
             }
         }
-        else if (state == State.Detached)
+        else if (state == State.Falling)
         {
-            rigidBody.AddForce(-hit.normal * 10f, ForceMode.Acceleration);
+            rigidBody.linearDamping = 0;
+            // Add more gravity, if needed
+        }
+        else if (state == State.Slipping)
+        {
+            rigidBody.linearDamping = 0;
+            // Add more gravity, if needed
         }
 
         if (ascendRequested)
         {
             ascendRequested = false;
             rigidBody.linearDamping = 0;
-            rigidBody.AddForce(up * ASCEND_FORCE, ForceMode.Impulse); // qqq unrealistic, landing will hurt
+            rigidBody.AddForce(up * ASCEND_FORCE, ForceMode.Impulse);
             state = State.Ascending;
             StartCoroutine(AscendCooldown());
         }
@@ -131,107 +157,10 @@ public class PlayerMovementController : MonoBehaviour
         {
             descendRequested = false;
             rigidBody.linearDamping = 0;
-            rigidBody.AddForce(-up * DESCEND_FORCE, ForceMode.Impulse); // qqq unrealistic, landing will hurt
-            StartCoroutine(DescendCooldown());
-        }
-    }
-
-    void FixedUpdateX()
-    {
-        Vector3 up = PhysicsUtils.Up(transform);
-
-        float radius = capsuleCollider.radius;
-        if (Physics.SphereCast(transform.position, radius, -transform.up, out RaycastHit hit, 100f))
-        {
-            altitude = hit.distance + radius - Constants.PLAYER_HEIGHT * 0.5f;
-        }
-
-        /*
-
-        //if (Physics.CapsuleCast())
-        //{
-        //    altitude = hit.distance + radius - Constants.PLAYER_HEIGHT * 0.5f;
-        //}
-        */
-
-        // Split current velocity
-        Vector3 currentVelocity = rigidBody.linearVelocity;
-        Vector3 verticalComponent = Vector3.Project(currentVelocity, up);
-        Vector3 horizontalComponent = currentVelocity - verticalComponent;
-
-        Debug.Log($"currentVelocity={currentVelocity}, up={up}, verticalComponent={verticalComponent}, horizontalComponent={horizontalComponent}");
-
-        horizontalSpeed = horizontalComponent.magnitude;
-        verticalSpeed = verticalComponent.magnitude * Mathf.Sign(Vector3.Dot(verticalComponent, up));
-
-        //grounded = altitude <= GROUNDED_THRESHOLD;
-        //if (grounded)
-        //{
-            // Get player move direction based in which way they are facing and user inputs
-            Vector3 moveDirection = orientation.forward * moveInputZ + orientation.right * moveInputX;
-            if (moveDirection.sqrMagnitude > 0f)
-            {
-                /*
-                    // Apply movement to horizontal component
-                    Vector3 moveDirOnGround = Vector3.ProjectOnPlane(moveDirection, groundNormal).normalized;
-                    horizontalComponent = Vector3.ClampMagnitude(horizontalComponent + moveDirOnGround * HORIZONTAL_MOVEMENT_FACTOR, 4f);
-                */
-
-                horizontalComponent = Vector3.ClampMagnitude(horizontalComponent + moveDirection, 4f);
-            }
-            else
-            {
-                // Decay horizontalComponent if moveDir is zero
-                //horizontalComponent *= HORIZONTAL_MOVEMENT_DECAY;
-                //horizontalComponent *= 0.8f;
-                horizontalComponent = Vector3.zero;
-            }
-
-            // Recombine components and add back to current velocity
-            rigidBody.linearVelocity = horizontalComponent + verticalComponent;
-            Debug.Log($"2o..forward={orientation.transform.forward}, o..right={orientation.transform.right}, moveDirection={moveDirection}, rigidBody.linearVelocity={rigidBody.linearVelocity}, horizontalComponent={horizontalComponent}, verticalComponent={verticalComponent}");
-
-            /*
-            Debug.Log($"horizontalComponent={horizontalComponent}");
-            Debug.Log($"verticalComponent={verticalComponent}");
-            Debug.Log($"groundNormal={groundNormal}");
-            */
-        //}
-        //else
-        //{
-            //rigidBody.AddForce(-1 * Constants.GRAVITY_STRENGTH_ASTEROID * up, ForceMode.Acceleration);
-        //}
-
-        if (ascendRequested)
-        {
-            ascendRequested = false;
-            rigidBody.linearVelocity = new Vector3(rigidBody.linearVelocity.x, 0f, rigidBody.linearVelocity.z);
-            rigidBody.AddForce(up * ASCEND_FORCE, ForceMode.Impulse);
-            StartCoroutine(AscendCooldown());
-        }
-
-        if (descendRequested)
-        {
-            descendRequested = false;
-            rigidBody.linearVelocity = new Vector3(rigidBody.linearVelocity.x, 0f, rigidBody.linearVelocity.z);
             rigidBody.AddForce(-up * DESCEND_FORCE, ForceMode.Impulse);
             StartCoroutine(DescendCooldown());
         }
     }
-
-    //void OnCollisionStay(Collision collision)
-    //{
-    //    Vector3 normal = Vector3.zero;
-    //    for (int i = 0; i < collision.contactCount; i++)
-    //    {
-    //        normal += collision.contacts[i].normal;
-    //    }
-    //    groundNormal = (normal / collision.contactCount).normalized;
-
-    //    Debug.Log($"groundNormal={groundNormal}, collision.contactCount={collision.contactCount}");
-
-    //    // qqq what if I hit a vertical wall? then result is 45d?
-    //}
 
     public void HandleAscend()
     {
@@ -244,7 +173,7 @@ public class PlayerMovementController : MonoBehaviour
 
     public void HandleDescend()
     {
-        if ((state == State.Ascending || state == State.Descending) && descendReady)
+        if ((state == State.Falling || state == State.Ascending) && descendReady)
         {
             descendReady = false;
             descendRequested = true;
