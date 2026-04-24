@@ -1,20 +1,19 @@
 using System.Collections;
 using UnityEngine;
-using UnityEngine.EventSystems;
-using UnityEngine.UI;
+
 
 // Flat surface
 // Jump
 // Descend
+// Slope up
+// Slope down
 
-// Slope up -> steepness problem
-// Slope down -> steepness problem
+// Ladder
+// Grappling hoook
 
 // Climbing
 // Vaulting
 // Stairs
-// Ladder
-// Grappling hoook
 // ledges
 // sprint
 
@@ -74,44 +73,62 @@ public class PlayerMovementController : MonoBehaviour
         Vector3 up = PhysicsUtils.Up(transform);
 
         float radius = capsuleCollider.radius - 0.01f;
-        if (Physics.SphereCast(transform.position, radius, -transform.up, out RaycastHit hit, ALTITUDE_CHECK_MAX_DISTANCE))
+        bool hasGround = Physics.SphereCast(transform.position, radius, -transform.up, out RaycastHit hit, ALTITUDE_CHECK_MAX_DISTANCE);
+        if (hasGround)
         {
             altitude = hit.distance + radius - Constants.PLAYER_HEIGHT * 0.5f;
         }
 
-        // Split current velocity
         Vector3 currentVelocity = rigidBody.linearVelocity;
         Vector3 verticalComponent = Vector3.Project(currentVelocity, up);
         Vector3 horizontalComponent = currentVelocity - verticalComponent;
         horizontalSpeed = horizontalComponent.magnitude;
         verticalSpeed = verticalComponent.magnitude * Mathf.Sign(Vector3.Dot(verticalComponent, up));
 
-        float slopeAngle = Vector3.Angle(up, hit.normal);
+        float slopeAngle = hasGround ? Vector3.Angle(up, hit.normal) : 90f;
         bool isGrounded = altitude <= GROUNDED_THRESHOLD;
 
-        if (isGrounded && (state == State.Falling || state == State.Ascending))
+        switch (state)
         {
-            state = State.Grounded;
-        }
-        else if (!isGrounded && state == State.Grounded)
-        {
-            state = State.Falling;
-        }
-        else if (verticalSpeed < 0 && state == State.Ascending)
-        {
-            state = State.Falling;
-        }
-        else if (slopeAngle > MAX_SLOPE_ANGLE && state == State.Grounded)
-        {
-            state = State.Slipping;
-        }
-        else if (slopeAngle <= MAX_SLOPE_ANGLE && isGrounded && state == State.Slipping)
-        {
-            state = State.Grounded;
-        }
-        else if (slopeAngle <= MAX_SLOPE_ANGLE && !isGrounded && state == State.Slipping)
-        {
-            state = State.Falling;
+            case State.Falling:
+                if (isGrounded) 
+                {
+                    state = State.Grounded;
+                }
+                break;
+            case State.Grounded:
+                if (!isGrounded)
+                {
+                    state = State.Falling;
+                }
+                else if (slopeAngle > MAX_SLOPE_ANGLE)
+                {
+                    state = State.Slipping;
+                }
+                break;
+            case State.Ascending:
+                if (isGrounded)
+                {
+                    state = State.Grounded;
+                }
+                else if (verticalSpeed < 0)
+                {
+                    state = State.Falling;
+                }
+                break;
+            case State.Slipping:
+                if (slopeAngle <= MAX_SLOPE_ANGLE)
+                {
+                    if (isGrounded)
+                    {
+                        state = State.Grounded;
+                    }
+                    else
+                    {
+                        state = State.Falling;
+                    }
+                }
+                break;
         }
 
         Debug.Log($"state={state}, currentVelocity={currentVelocity}, currentVelocity.magnitude={currentVelocity.magnitude}, up={up}, hn={hit.normal}, verticalComponent={verticalComponent}, horizontalComponent={horizontalComponent}, slopeAngle={slopeAngle}");
