@@ -7,9 +7,10 @@ using UnityEngine;
 // Descend
 // Slope up
 // Slope down
-
 // Ladder
+
 // Grappling hoook
+// Alitutude coyote time?
 
 // Climbing
 // Vaulting
@@ -29,12 +30,17 @@ public class PlayerMovementController : MonoBehaviour
     private const float DESCEND_FORCE = 600f;
     private const float DESCEND_COOLDOWN = 1f;
     private const float GROUNDED_THRESHOLD = 0.02f;
-    private const float MAX_VELOCITY = 4f;
-    private const float VELOCITY_FACTOR = 10f;
+    private const float MAX_VELOCITY_GROUNDED = 4f;
+    private const float MAX_VELOCITY_LADDER = 2f;
+    private const float MAX_VELOCITY_LADDER_TOP = 1f;
+    private const float FACTOR_GROUNDED = 10f;
+    private const float FACTOR_LADDER = 10f;
+    private const float FACTOR_LADDER_TOP = 5f;
     private const float MIN_LINEAR_DAMPING = 1f;
     private const float MAX_LINEAR_DAMPING = 100f;
     private const float LINEAR_DAMPING_FACTOR = 2f;
     private const float MAX_SLOPE_ANGLE = 50f;
+    private const float LADDER_TOP_TIME = 0.15f;
 
     private enum State
     {
@@ -42,6 +48,9 @@ public class PlayerMovementController : MonoBehaviour
         Grounded,
         Ascending,
         Slipping,
+        Ladder,
+        LadderBottom,
+        LadderTop
     }
 
     private float altitude = 0f;
@@ -54,6 +63,8 @@ public class PlayerMovementController : MonoBehaviour
     private float moveInputX;
     private float moveInputZ;
     private Rigidbody rigidBody;
+    private LadderController activeLadder = null;
+    private float ladderTopTimer = 0f;
     private State state = State.Falling;
 
     public float Altitude => altitude;
@@ -87,17 +98,26 @@ public class PlayerMovementController : MonoBehaviour
 
         float slopeAngle = hasGround ? Vector3.Angle(up, hit.normal) : 90f;
         bool isGrounded = altitude <= GROUNDED_THRESHOLD;
+        bool facingLadder = activeLadder != null && Vector3.Dot(activeLadder.transform.position - transform.position, orientation.forward) > 0;
 
         switch (state)
         {
             case State.Falling:
-                if (isGrounded) 
+                if (facingLadder)
+                {
+                    state = State.Ladder;
+                }
+                else if (isGrounded) 
                 {
                     state = State.Grounded;
                 }
                 break;
             case State.Grounded:
-                if (!isGrounded)
+                if (facingLadder)
+                {
+                    state = State.Ladder;
+                }
+                else if (!isGrounded)
                 {
                     state = State.Falling;
                 }
@@ -107,7 +127,11 @@ public class PlayerMovementController : MonoBehaviour
                 }
                 break;
             case State.Ascending:
-                if (isGrounded)
+                if (facingLadder)
+                {
+                    state = State.Ladder;
+                }
+                else if (isGrounded)
                 {
                     state = State.Grounded;
                 }
@@ -117,7 +141,11 @@ public class PlayerMovementController : MonoBehaviour
                 }
                 break;
             case State.Slipping:
-                if (slopeAngle <= MAX_SLOPE_ANGLE)
+                if (facingLadder)
+                {
+                    state = State.Ladder;
+                }
+                else if (slopeAngle <= MAX_SLOPE_ANGLE)
                 {
                     if (isGrounded)
                     {
@@ -129,36 +157,95 @@ public class PlayerMovementController : MonoBehaviour
                     }
                 }
                 break;
+            case State.Ladder:
+                if (!facingLadder)
+                {
+                    if (isGrounded)
+                    {
+                        state = State.Grounded;
+                    }
+                    else if (verticalSpeed <= 0)
+                    {
+                        state = State.Falling;
+                    }
+                    else if (verticalSpeed > 0)
+                    {
+                        state = State.LadderTop;
+                        ladderTopTimer = 0;
+                    }
+                }
+                break;
+            case State.LadderTop:
+                ladderTopTimer += Time.fixedDeltaTime;
+                if (ladderTopTimer >= LADDER_TOP_TIME)
+                {
+                    state = State.Falling;
+                }
+                break;
         }
 
-        Debug.Log($"state={state}, currentVelocity={currentVelocity}, currentVelocity.magnitude={currentVelocity.magnitude}, up={up}, hn={hit.normal}, verticalComponent={verticalComponent}, horizontalComponent={horizontalComponent}, slopeAngle={slopeAngle}");
+        //Debug.Log($"state={state}, rigidBody.linearDamping={rigidBody.linearDamping}");
 
         if (state == State.Grounded)
         {
             Vector3 moveDirection = orientation.forward * moveInputZ + orientation.right * moveInputX;
             if (moveDirection.sqrMagnitude > 0f)
             {
-                Vector3 targetVelocity = moveDirection.normalized * MAX_VELOCITY;
+                Vector3 targetVelocity = moveDirection.normalized * MAX_VELOCITY_GROUNDED;
                 Vector3 deltaVelocity = targetVelocity - currentVelocity;
                 Vector3 deltaVelocityPlane = Vector3.ProjectOnPlane(deltaVelocity, hit.normal);
                 rigidBody.linearDamping = 0;
-                rigidBody.AddForce(deltaVelocityPlane * VELOCITY_FACTOR, ForceMode.Acceleration);
-                Debug.Log($"deltaVelocityPlane={deltaVelocityPlane}");
+                rigidBody.AddForce(deltaVelocityPlane * FACTOR_GROUNDED, ForceMode.Acceleration);
             }
             else
             {
-                rigidBody.linearDamping = Mathf.Clamp(rigidBody.linearDamping * LINEAR_DAMPING_FACTOR, MIN_LINEAR_DAMPING, MAX_LINEAR_DAMPING);
+                StopMoving();
             }
         }
         else if (state == State.Falling)
         {
             rigidBody.linearDamping = 0;
-            // Add more gravity, if needed
         }
         else if (state == State.Slipping)
         {
             rigidBody.linearDamping = 0;
-            // Add more gravity, if needed
+        }
+        else if (state == State.Ladder)
+        {
+            Vector3 moveDirection = orientation.up * moveInputZ + orientation.right * moveInputX;
+
+            // Step away from ladder
+            if (isGrounded && moveInputZ < 0)
+            {
+                moveDirection = orientation.forward * moveInputZ + orientation.right * moveInputX;
+            }
+
+            if (moveDirection.sqrMagnitude > 0f)
+            {
+                Vector3 targetVelocity = moveDirection.normalized * MAX_VELOCITY_LADDER;
+                Vector3 deltaVelocity = targetVelocity - currentVelocity;
+                rigidBody.linearDamping = 0;
+                rigidBody.AddForce(deltaVelocity * FACTOR_LADDER, ForceMode.Acceleration);
+            }
+            else
+            {
+                StopMoving();
+            }
+
+        }
+        else if (state == State.LadderTop)
+        {
+            Vector3 moveDirection = orientation.forward * moveInputZ + orientation.right * moveInputX;
+            if (moveDirection.sqrMagnitude > 0f)
+            {
+                Vector3 targetVelocity = moveDirection.normalized * MAX_VELOCITY_LADDER_TOP;
+                rigidBody.linearDamping = 0;
+                rigidBody.AddForce(targetVelocity * FACTOR_LADDER_TOP, ForceMode.Acceleration);
+            }
+            else
+            {
+                StopMoving();
+            }
         }
 
         if (ascendRequested)
@@ -176,6 +263,25 @@ public class PlayerMovementController : MonoBehaviour
             rigidBody.linearDamping = 0;
             rigidBody.AddForce(-up * DESCEND_FORCE, ForceMode.Impulse);
             StartCoroutine(DescendCooldown());
+        }
+    }
+
+    void OnTriggerEnter(Collider other)
+    {
+        if (other.TryGetComponent(out LadderController ladderController))
+        {
+            activeLadder = ladderController;
+        }
+    }
+
+    private void OnTriggerExit(Collider other)
+    {
+        if (other.TryGetComponent(out LadderController ladderController))
+        {
+            if (ladderController == activeLadder)
+            {
+                activeLadder = null;
+            }
         }
     }
 
@@ -213,5 +319,10 @@ public class PlayerMovementController : MonoBehaviour
     {
         yield return new WaitForSeconds(DESCEND_COOLDOWN);
         descendReady = true;
+    }
+
+    private void StopMoving()
+    {
+        rigidBody.linearDamping = Mathf.Clamp(rigidBody.linearDamping * LINEAR_DAMPING_FACTOR, MIN_LINEAR_DAMPING, MAX_LINEAR_DAMPING);
     }
 }

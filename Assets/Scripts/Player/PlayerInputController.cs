@@ -1,7 +1,7 @@
 using UnityEngine;
 
-/*
 [RequireComponent(typeof(PlayerInteractController))]
+/*
 [RequireComponent(typeof(PlayerJetpackController))]
 */
 
@@ -14,7 +14,9 @@ public class PlayerInputController : MonoBehaviour
     [SerializeField] private PlayerCanvasController playerCanvasController;
     [SerializeField] private PlayerHelmetLightController playerHelmetLightController;
 
+    */
     private PlayerInteractController playerInteractController;
+    /*
     private PlayerJetpackController playerJetpackController;
     */
 
@@ -22,8 +24,8 @@ public class PlayerInputController : MonoBehaviour
 
     void Awake()
     {
+        playerInteractController = GetComponent<PlayerInteractController>();
         /*
-                playerInteractController = GetComponent<PlayerInteractController>();
                 playerJetpackController = GetComponent<PlayerJetpackController>();
         */
         playerMovementController = GetComponent<PlayerMovementController>();
@@ -31,10 +33,10 @@ public class PlayerInputController : MonoBehaviour
 
     void Update()
     {
-        //if (AsteroidCameraManager.Instance.AsteroidViewMode != AsteroidViewMode.Player)
-        //{
-        //    return;
-        //}
+        if (AsteroidCameraManager.Instance.AsteroidViewMode != AsteroidViewMode.Player)
+        {
+            return;
+        }
 
         if (Input.GetKeyDown(KeyCode.Tab))
         {
@@ -50,7 +52,7 @@ public class PlayerInputController : MonoBehaviour
         }
         else if (Input.GetKeyDown(KeyCode.E))
         {
-            //playerInteractController.HandleInteraction();
+            playerInteractController.HandleInteraction();
         }
         else if (Input.GetKeyDown(KeyCode.Space))
         {

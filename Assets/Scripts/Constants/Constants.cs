@@ -11,6 +11,8 @@
 // Same GameObject + Optional -> GetComponent (no require)
 // Different GameObject -> SerializeField
 
+// what about making the player orbit the asteroid when approaching?
+
 using UnityEngine;
 
 public static class Constants
