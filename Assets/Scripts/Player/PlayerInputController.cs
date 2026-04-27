@@ -1,4 +1,6 @@
+using Unity.VisualScripting;
 using UnityEngine;
+using UnityEngine.InputSystem;
 
 [RequireComponent(typeof(PlayerInteractController))]
 /*
@@ -9,6 +11,7 @@ using UnityEngine;
 public class PlayerInputController : MonoBehaviour
 {
     [SerializeField] private PlayerCameraController playerCameraController;
+    [SerializeField] private GrapplingGunController grapplingGunController;
 
     /*
     [SerializeField] private PlayerCanvasController playerCanvasController;
@@ -29,6 +32,10 @@ public class PlayerInputController : MonoBehaviour
                 playerJetpackController = GetComponent<PlayerJetpackController>();
         */
         playerMovementController = GetComponent<PlayerMovementController>();
+
+
+        // qqq not here!
+        CursorUtils.DisableCursor();
     }
 
     void Update()
@@ -46,15 +53,18 @@ public class PlayerInputController : MonoBehaviour
         {
             //playerCanvasController.HandleShowObjectives(false);
         }
-        else if (Input.GetKeyDown(KeyCode.F))
+        
+        if (Input.GetKeyDown(KeyCode.F))
         {
             //playerHelmetLightController.HandleToggleHelmetLight();
         }
-        else if (Input.GetKeyDown(KeyCode.E))
+        
+        if (Input.GetKeyDown(KeyCode.E))
         {
             playerInteractController.HandleInteraction();
         }
-        else if (Input.GetKeyDown(KeyCode.Space))
+        
+        if (Input.GetKeyDown(KeyCode.Space))
         {
             playerMovementController.HandleAscend();
         }
@@ -66,6 +76,16 @@ public class PlayerInputController : MonoBehaviour
         {
             //playerJetpackController.HandleForward();
         }
+
+        if (Input.GetMouseButtonDown(0))
+        {
+            grapplingGunController.HandlePrimaryFire();
+        }
+        if (Input.GetMouseButtonDown(1))
+        {
+            grapplingGunController.HandleAlternateFire();
+        }
+
         playerCameraController.HandleMouseLook();
         playerMovementController.HandleMovement();
     }

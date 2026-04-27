@@ -1,3 +1,4 @@
+using System;
 using System.Collections;
 using UnityEngine;
 
@@ -8,10 +9,11 @@ using UnityEngine;
 // Slope up
 // Slope down
 // Ladder
+// Grappling
 
-// Grappling hoook
+// OV Pharah style flight
 // Alitutude coyote time?
-
+// automatic landing softener?
 // Climbing
 // Vaulting
 // Stairs
@@ -33,24 +35,26 @@ public class PlayerMovementController : MonoBehaviour
     private const float MAX_VELOCITY_GROUNDED = 4f;
     private const float MAX_VELOCITY_LADDER = 2f;
     private const float MAX_VELOCITY_LADDER_TOP = 1f;
+    private const float MAX_VELOCITY_GRAPPLE = 6f;
     private const float FACTOR_GROUNDED = 10f;
     private const float FACTOR_LADDER = 10f;
     private const float FACTOR_LADDER_TOP = 5f;
+    private const float FACTOR_GRAPPLE = 10f;
     private const float MIN_LINEAR_DAMPING = 1f;
     private const float MAX_LINEAR_DAMPING = 100f;
     private const float LINEAR_DAMPING_FACTOR = 2f;
     private const float MAX_SLOPE_ANGLE = 50f;
     private const float LADDER_TOP_TIME = 0.15f;
 
-    private enum State
+    public enum State
     {
-        Falling,
         Grounded,
+        Falling,
         Ascending,
         Slipping,
         Ladder,
-        LadderBottom,
-        LadderTop
+        LadderTop,
+        Grappling,
     }
 
     private float altitude = 0f;
@@ -66,6 +70,13 @@ public class PlayerMovementController : MonoBehaviour
     private LadderController activeLadder = null;
     private float ladderTopTimer = 0f;
     private State state = State.Falling;
+#if UNITY_EDITOR
+    private State debugPrevState = State.Falling;
+#endif
+    private bool playerControl = true;
+    private bool grapplePullRequested = false;
+    private bool grappleRetractRequested = false;
+    private Vector3 grapplePosition = Vector3.zero;
 
     public float Altitude => altitude;
     //public float AngleToCapsule => angleToCapsule;
@@ -100,52 +111,58 @@ public class PlayerMovementController : MonoBehaviour
         bool isGrounded = altitude <= GROUNDED_THRESHOLD;
         bool facingLadder = activeLadder != null && Vector3.Dot(activeLadder.transform.position - transform.position, orientation.forward) > 0;
 
+        /* State transitions */
+
+        if (grapplePullRequested)
+        {
+            state = State.Grappling;
+        }
+        else if (facingLadder && (
+            state == State.Grounded ||
+            state == State.Falling || 
+            state == State.Ascending || 
+            state == State.Slipping))
+        {
+            state = State.Ladder;
+        }
+
         switch (state)
         {
-            case State.Falling:
-                if (facingLadder)
-                {
-                    state = State.Ladder;
-                }
-                else if (isGrounded) 
-                {
-                    state = State.Grounded;
-                }
-                break;
             case State.Grounded:
-                if (facingLadder)
+                if (!isGrounded)
                 {
-                    state = State.Ladder;
-                }
-                else if (!isGrounded)
-                {
-                    state = State.Falling;
+                    if (verticalSpeed <= 0)
+                    {
+                        state = State.Falling;
+                    }
+                    else
+                    {
+                        state = State.Ascending;
+                    }
                 }
                 else if (slopeAngle > MAX_SLOPE_ANGLE)
                 {
                     state = State.Slipping;
                 }
                 break;
-            case State.Ascending:
-                if (facingLadder)
-                {
-                    state = State.Ladder;
-                }
-                else if (isGrounded)
+            case State.Falling:
+                if (isGrounded)
                 {
                     state = State.Grounded;
                 }
-                else if (verticalSpeed < 0)
+                break;
+            case State.Ascending:
+                if (isGrounded)
+                {
+                    state = State.Grounded;
+                }
+                else if (verticalSpeed <= 0)
                 {
                     state = State.Falling;
                 }
                 break;
             case State.Slipping:
-                if (facingLadder)
-                {
-                    state = State.Ladder;
-                }
-                else if (slopeAngle <= MAX_SLOPE_ANGLE)
+                if (slopeAngle <= MAX_SLOPE_ANGLE)
                 {
                     if (isGrounded)
                     {
@@ -182,29 +199,66 @@ public class PlayerMovementController : MonoBehaviour
                     state = State.Falling;
                 }
                 break;
+            case State.Grappling:
+                if (grappleRetractRequested)
+                {
+                    state = State.Falling;
+                }
+                break;
         }
 
-        //Debug.Log($"state={state}, rigidBody.linearDamping={rigidBody.linearDamping}");
+#if UNITY_EDITOR
+        if (state != debugPrevState)
+        {
+            Debug.Log($"PrevState={debugPrevState} -> CurrState={state}");
+            debugPrevState = state;
+        }
+#endif
+
+        /* State behavior */
 
         if (state == State.Grounded)
         {
-            Vector3 moveDirection = orientation.forward * moveInputZ + orientation.right * moveInputX;
-            if (moveDirection.sqrMagnitude > 0f)
+            if (ascendRequested && ascendReady)
             {
-                Vector3 targetVelocity = moveDirection.normalized * MAX_VELOCITY_GROUNDED;
-                Vector3 deltaVelocity = targetVelocity - currentVelocity;
-                Vector3 deltaVelocityPlane = Vector3.ProjectOnPlane(deltaVelocity, hit.normal);
                 rigidBody.linearDamping = 0;
-                rigidBody.AddForce(deltaVelocityPlane * FACTOR_GROUNDED, ForceMode.Acceleration);
+                rigidBody.AddForce(up * ASCEND_FORCE, ForceMode.Impulse);
+                StartCoroutine(AscendCooldown());
             }
             else
             {
-                StopMoving();
+                Vector3 moveDirection = orientation.forward * moveInputZ + orientation.right * moveInputX;
+                if (moveDirection.sqrMagnitude > 0f)
+                {
+                    Vector3 targetVelocity = moveDirection.normalized * MAX_VELOCITY_GROUNDED;
+                    Vector3 deltaVelocity = targetVelocity - currentVelocity;
+                    Vector3 deltaVelocityPlane = Vector3.ProjectOnPlane(deltaVelocity, hit.normal);
+                    rigidBody.linearDamping = 0;
+                    rigidBody.AddForce(deltaVelocityPlane * FACTOR_GROUNDED, ForceMode.Acceleration);
+                }
+                else
+                {
+                    DampenMovement();
+                }
             }
         }
         else if (state == State.Falling)
         {
             rigidBody.linearDamping = 0;
+            if (descendRequested && descendReady)
+            {
+                rigidBody.AddForce(-up * DESCEND_FORCE, ForceMode.Impulse);
+                StartCoroutine(DescendCooldown());
+            }
+        }
+        else if (state == State.Ascending)
+        {
+            rigidBody.linearDamping = 0;
+            if (descendRequested && descendReady)
+            {
+                rigidBody.AddForce(-up * DESCEND_FORCE, ForceMode.Impulse);
+                StartCoroutine(DescendCooldown());
+            }
         }
         else if (state == State.Slipping)
         {
@@ -229,7 +283,7 @@ public class PlayerMovementController : MonoBehaviour
             }
             else
             {
-                StopMoving();
+                DampenMovement();
             }
 
         }
@@ -244,26 +298,22 @@ public class PlayerMovementController : MonoBehaviour
             }
             else
             {
-                StopMoving();
+                DampenMovement();
             }
         }
-
-        if (ascendRequested)
+        else if (state == State.Grappling)
         {
-            ascendRequested = false;
+            Vector3 grappleDirection = grapplePosition - transform.position;
+            Vector3 targetVelocity = grappleDirection.normalized * MAX_VELOCITY_GRAPPLE;
+            Vector3 deltaVelocity = targetVelocity - currentVelocity;
             rigidBody.linearDamping = 0;
-            rigidBody.AddForce(up * ASCEND_FORCE, ForceMode.Impulse);
-            state = State.Ascending;
-            StartCoroutine(AscendCooldown());
+            rigidBody.AddForce(deltaVelocity * FACTOR_GRAPPLE, ForceMode.Acceleration);
         }
 
-        if (descendRequested)
-        {
-            descendRequested = false;
-            rigidBody.linearDamping = 0;
-            rigidBody.AddForce(-up * DESCEND_FORCE, ForceMode.Impulse);
-            StartCoroutine(DescendCooldown());
-        }
+        ascendRequested = false;
+        descendRequested = false;
+        grapplePullRequested = false;
+        grappleRetractRequested = false;
     }
 
     void OnTriggerEnter(Collider other)
@@ -287,41 +337,65 @@ public class PlayerMovementController : MonoBehaviour
 
     public void HandleAscend()
     {
-        if (state == State.Grounded && ascendReady)
+        if (playerControl)
         {
-            ascendReady = false;
             ascendRequested = true;
         }
     }
 
     public void HandleDescend()
     {
-        if ((state == State.Falling || state == State.Ascending) && descendReady)
+        if (playerControl)
         {
-            descendReady = false;
             descendRequested = true;
         }
     }
 
     public void HandleMovement()
     {
-        moveInputX = Input.GetAxisRaw("Horizontal");
-        moveInputZ = Input.GetAxisRaw("Vertical");
+        if (playerControl)
+        {
+            moveInputX = Input.GetAxisRaw("Horizontal");
+            moveInputZ = Input.GetAxisRaw("Vertical");
+        }
+        else
+        {
+            moveInputX = 0;
+            moveInputZ = 0;
+        }
+    }
+
+    public void HandleGrapplePull(Vector3 position)
+    {
+        grapplePullRequested = true;
+        grapplePosition = position;
+    }
+
+    public void HandleGrappleRetract()
+    {
+        grappleRetractRequested = true;
+    }
+
+    public void SetPlayerControl(bool newValue)
+    {
+        playerControl = newValue;
     }
 
     private IEnumerator AscendCooldown()
     {
+        ascendReady = false;
         yield return new WaitForSeconds(ASCEND_COOLDOWN);
         ascendReady = true;
     }
 
     private IEnumerator DescendCooldown()
     {
+        descendReady = false;
         yield return new WaitForSeconds(DESCEND_COOLDOWN);
         descendReady = true;
     }
 
-    private void StopMoving()
+    private void DampenMovement()
     {
         rigidBody.linearDamping = Mathf.Clamp(rigidBody.linearDamping * LINEAR_DAMPING_FACTOR, MIN_LINEAR_DAMPING, MAX_LINEAR_DAMPING);
     }
